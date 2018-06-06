@@ -10,10 +10,18 @@ namespace piSenseHatModbusModule
     using System.Threading.Tasks;
     using Microsoft.Azure.Devices.Client;
     using Microsoft.Azure.Devices.Client.Transport.Mqtt;
+    using Newtonsoft.Json;
+    using System.Collections.Generic;     // for KeyValuePair<>
+    using Microsoft.Azure.Devices.Shared;
 
     class Program
     {
         static int counter;
+        
+        // Twin module variables
+        static int redThreshold { get; set; } = 300;
+        static int amberThreshold { get; set; } = 260;
+        static int greenThreshold { get; set;} = 250;
 
         static void Main(string[] args)
         {
@@ -90,7 +98,163 @@ namespace piSenseHatModbusModule
             Console.WriteLine("IoT Hub module client initialized.");
 
             // Register callback to be called when a message is received by the module
-            await ioTHubModuleClient.SetInputMessageHandlerAsync("input1", PipeMessage, ioTHubModuleClient);
+            // await ioTHubModuleClient.SetImputMessageHandlerAsync("input1", PipeMessage, iotHubModuleClient);
+
+            // Read redThreshold from Module Twin Desired Properties
+            var moduleTwin = await ioTHubModuleClient.GetTwinAsync();
+            var moduleTwinCollection = moduleTwin.Properties.Desired;
+            try {
+                redThreshold = moduleTwinCollection["redThreshold"];
+            } catch(ArgumentOutOfRangeException e) {
+                Console.WriteLine("Property redThreshold not exist");
+            }
+            try {
+                amberThreshold = moduleTwinCollection["amberThreshold"];
+            } catch(ArgumentOutOfRangeException e) {
+                Console.WriteLine("Property amberThreshold not exist");
+            }
+            try {
+                greenThreshold = moduleTwinCollection["greenThreshold"];
+            } catch(ArgumentOutOfRangeException e) {
+                Console.WriteLine("Property greenThreshold not exist");
+            }
+
+
+
+            // Attach callback for Twin desired properties updates
+            await ioTHubModuleClient.SetDesiredPropertyUpdateCallbackAsync(onDesiredPropertiesUpdate, null);
+
+            // Register callback to be called when a message is received by the module
+            await ioTHubModuleClient.SetInputMessageHandlerAsync("input1", CheckTemperature, ioTHubModuleClient);
+        }
+
+        static async Task<MessageResponse> CheckTemperature(Message message, object userContext)
+        {
+            var counterValue = Interlocked.Increment(ref counter);
+        
+            try {
+                DeviceClient deviceClient = (DeviceClient)userContext;
+
+                var messageBytes = message.GetBytes();
+                var messageString = Encoding.UTF8.GetString(messageBytes);
+                Console.WriteLine($"Received message {counterValue}: [{messageString}]");
+
+                if (!string.IsNullOrEmpty(messageString))
+                {
+                    // Get the body of the message and deserialize it
+                    var dataBody = JsonConvert.DeserializeObject<Data[]>(messageString);
+                    Console.WriteLine("Done. Count = " + dataBody.Length);
+
+                    if (dataBody.Length >= 1)
+                    {
+                        for(int i = 0; i < dataBody.Length; i++)
+                        {
+                            var hwID = dataBody[i].HwId;
+                            if (dataBody[i].DisplayName.Equals("Temperature"))
+                            {
+                                float currentTemp = Int32.Parse(dataBody[i].Value);
+                                currentTemp = currentTemp / 10;
+                                Console.WriteLine($"RED: {redThreshold}  AMBER: {amberThreshold}  GREEN: {greenThreshold}");
+                                if (currentTemp > redThreshold) {
+                                    Console.WriteLine("Temp RED alarm: " + currentTemp);
+                                    using (var stream = GenerateStreamFromString("{\"HwId\":\"" + hwID + "\",\"UId\":\"1\",\"Address\":\"40011\",\"Value\":\"2\"}"))
+                                    {
+                                        var deviceMessage = new Message(stream);
+                                        deviceMessage.Properties.Add("command-type","ModbusWrite");
+                                        await deviceClient.SendEventAsync("output1", deviceMessage);
+                                    }  
+                                } else if (currentTemp > amberThreshold) {
+                                    Console.WriteLine("Temp AMBER alarm: " + currentTemp);
+                                    using (var stream = GenerateStreamFromString("{\"HwId\":\"" + hwID + "\",\"UId\":\"1\",\"Address\":\"40011\",\"Value\":\"1\"}"))
+                                    {
+                                        var deviceMessage = new Message(stream);
+                                        deviceMessage.Properties.Add("command-type","ModbusWrite");
+                                        await deviceClient.SendEventAsync("output1", deviceMessage);
+                                    }                          
+                                } else if (currentTemp < greenThreshold) {
+                                    Console.WriteLine("Temp GREEN no alarm: " + currentTemp);
+                                    using (var stream = GenerateStreamFromString("{\"HwId\":\"" + hwID + "\",\"UId\":\"1\",\"Address\":\"40011\",\"Value\":\"0\"}"))
+                                    {
+                                        var deviceMessage = new Message(stream);
+                                        deviceMessage.Properties.Add("command-type","ModbusWrite");
+                                        await deviceClient.SendEventAsync("output1", deviceMessage);
+                                    }                          
+                                }
+                            }  
+                    
+                        }
+
+                    } else {
+                        // do nothing;
+                    }
+                    
+                }
+
+                // Indicate that the message treatment is completed
+                return MessageResponse.Completed;
+            }
+            catch (AggregateException ex)
+            {
+                foreach (Exception exception in ex.InnerExceptions)
+                {
+                    Console.WriteLine();
+                    Console.WriteLine("Error in sample: {0}", exception);
+                }
+                // Indicate that the message treatment is not completed
+                var deviceClient = (DeviceClient)userContext;
+                return MessageResponse.Abandoned;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine();
+                Console.WriteLine("Error in sample: {0}", ex.Message);
+                // Indicate that the message treatment is not completed
+                DeviceClient deviceClient = (DeviceClient)userContext;
+                return MessageResponse.Abandoned;
+            }
+        }   
+
+
+        static Stream GenerateStreamFromString(string s)
+        {
+            var stream = new MemoryStream();
+            var writer = new StreamWriter(stream);
+            writer.Write(s);
+            writer.Flush();
+            stream.Position = 0;
+            return stream;
+        }
+
+
+        static Task onDesiredPropertiesUpdate(TwinCollection desiredProperties, object userContext)
+        {
+            try
+            {
+                Console.WriteLine("Desired property change:");
+                Console.WriteLine(JsonConvert.SerializeObject(desiredProperties));
+
+                if (desiredProperties["redThreshold"]!=null)
+                    redThreshold = desiredProperties["redThreshold"];
+                if (desiredProperties["amberThreshold"]!=null)
+                    amberThreshold = desiredProperties["amberThreshold"];
+                if (desiredProperties["greenThreshold"]!=null)
+                    greenThreshold = desiredProperties["greenThreshold"];                                        
+
+            }
+            catch (AggregateException ex)
+            {
+                foreach (Exception exception in ex.InnerExceptions)
+                {
+                    Console.WriteLine();
+                    Console.WriteLine("Error when receiving desired property: {0}", exception);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine();
+                Console.WriteLine("Error when receiving desired property: {0}", ex.Message);
+            }
+            return Task.CompletedTask;
         }
 
         /// <summary>
@@ -123,6 +287,23 @@ namespace piSenseHatModbusModule
                 Console.WriteLine("Received message sent");
             }
             return MessageResponse.Completed;
+        }
+
+        public class Data
+        {
+            public string DisplayName { get; set; }
+            public string HwId { get; set; }
+            public string Address { get; set; }
+            public string Value { get; set; }
+            public string SourceTimestamp { get; set; }
+        }
+
+        public class DeviceMessage
+        {
+            public string HwId { get; set;}
+            public string UId { get; set;}
+            public string Address {get ; set;}
+            public string Value {get ; set;}
         }
     }
 }
