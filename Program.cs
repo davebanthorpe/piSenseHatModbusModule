@@ -22,6 +22,7 @@ namespace piSenseHatModbusModule
         static int redThreshold { get; set; } = 300;
         static int amberThreshold { get; set; } = 260;
         static int greenThreshold { get; set;} = 250;
+        static int tempCorr { get; set; } = 6;
 
         static void Main(string[] args)
         {
@@ -118,6 +119,14 @@ namespace piSenseHatModbusModule
             } catch(ArgumentOutOfRangeException e) {
                 Console.WriteLine("Property greenThreshold not exist");
             }
+            try
+            {
+                tempCorr = moduleTwinCollection["tempCorr"];
+            }
+            catch (ArgumentOutOfRangeException e)
+            {
+                Console.WriteLine("Property tempCorr not exist");
+            }
 
 
 
@@ -131,7 +140,8 @@ namespace piSenseHatModbusModule
         static async Task<MessageResponse> CheckTemperature(Message message, object userContext)
         {
             var counterValue = Interlocked.Increment(ref counter);
-        
+
+
             try {
                 DeviceClient deviceClient = (DeviceClient)userContext;
 
@@ -180,6 +190,13 @@ namespace piSenseHatModbusModule
                                         await deviceClient.SendEventAsync("output1", deviceMessage);
                                     }                          
                                 }
+                                using (var stream = GenerateStreamFromString("{\"HwId\":\"" + hwID + "\",\"UId\":\"1\",\"Address\":\"40012\",\"Value\":\"" + tempCorr + "\"}"))
+                                {
+                                    var deviceMessage = new Message(stream);
+                                    deviceMessage.Properties.Add("command-type", "ModbusWrite");
+                                    await deviceClient.SendEventAsync("output1", deviceMessage);
+                                }
+
                             }  
                     
                         }
@@ -238,7 +255,10 @@ namespace piSenseHatModbusModule
                 if (desiredProperties["amberThreshold"]!=null)
                     amberThreshold = desiredProperties["amberThreshold"];
                 if (desiredProperties["greenThreshold"]!=null)
-                    greenThreshold = desiredProperties["greenThreshold"];                                        
+                    greenThreshold = desiredProperties["greenThreshold"];
+                if (desiredProperties["tempCorr"] != null) { 
+                    tempCorr = desiredProperties["tempCorr"];
+                }
 
             }
             catch (AggregateException ex)
