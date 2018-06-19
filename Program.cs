@@ -19,9 +19,11 @@ namespace piSenseHatModbusModule
         static int counter;
         
         // Twin module variables
-        static int redThreshold { get; set; } = 300;
-        static int amberThreshold { get; set; } = 260;
-        static int greenThreshold { get; set;} = 250;
+        static int redThreshold { get; set; } = 27;
+        static int amberThreshold { get; set; } = 25;
+        static int greenThreshold { get; set; } = 23;
+        static int cyanThreshold { get; set; } = 21;
+        static int blueThreshold {get;set; } = 19;
         static int tempCorr { get; set; } = 6;
 
         static void Main(string[] args)
@@ -118,6 +120,16 @@ namespace piSenseHatModbusModule
                 greenThreshold = moduleTwinCollection["greenThreshold"];
             } catch(ArgumentOutOfRangeException e) {
                 Console.WriteLine("Property greenThreshold not exist");
+            }
+            try {
+                cyanThreshold = moduleTwinCollection["cyanThreshold"];
+            } catch(ArgumentOutOfRangeException e) {
+                Console.WriteLine("Property cyanThreshold not exist");
+            }
+            try {
+                blueThreshold = moduleTwinCollection["blueThreshold"];
+            } catch(ArgumentOutOfRangeException e) {
+                Console.WriteLine("Property blueThreshold not exist");
             }
             try
             {
@@ -256,6 +268,10 @@ namespace piSenseHatModbusModule
                     amberThreshold = desiredProperties["amberThreshold"];
                 if (desiredProperties["greenThreshold"]!=null)
                     greenThreshold = desiredProperties["greenThreshold"];
+                if (desiredProperties["cyanThreshold"]!=null)
+                    cyanThreshold = desiredProperties["cyanThreshold"];
+                if (desiredProperties["blueThreshold"]!=null)
+                    blueThreshold = desiredProperties["blueThreshold"];
                 if (desiredProperties["tempCorr"] != null) { 
                     tempCorr = desiredProperties["tempCorr"];
                 }
